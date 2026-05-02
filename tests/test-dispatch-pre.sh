@@ -47,6 +47,9 @@ setup_fixture() {
     "${dir}/bin"
   printf '# dummy\n' >"${dir}/dummy.md"
   printf 'secret=%s\n' "ghp_$(printf '%025d' 0)" >"${dir}/secret.md"
+  printf 'mock-codex-test-key-12345\n' >"${dispatch_home}/.config/codex-api-key"
+  printf 'mock-anthropic-test-key-12345\n' >"${dispatch_home}/.config/anthropic-api-key"
+  chmod 600 "${dispatch_home}/.config/codex-api-key" "${dispatch_home}/.config/anthropic-api-key"
 
   cat >"${dir}/bin/id" <<'EOF'
 #!/usr/bin/env bash

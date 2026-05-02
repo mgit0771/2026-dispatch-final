@@ -7,7 +7,7 @@ SCRIPT_NAME="dispatch-loop-hardened"
 PROJECT=""; MANIFEST_FILE=""; TARGET_REPO=""; REVIEW_PROMPT_FILE=""
 WORKER_NAME="w1"; MODE="gate"; CREATE_REPO=0; TEARDOWN=0; MAX_WAIT_SEC=1800
 SCRIPTS_DIR="${DISPATCH_LOOP_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"; DRY_RUN=0
-CLAUDE_CREDENTIALS_FILE="${DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE:-/home/claudeuser/.claude/.credentials.json}"
+ANTHROPIC_KEY_FILE="${DISPATCH_LOOP_ANTHROPIC_KEY_FILE:-${DISPATCH_HOME}/.config/anthropic-api-key}"
 LOOP_ROOT="${DISPATCH_LOOP_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
 TEARDOWN_SCRIPT="${DISPATCH_LOOP_TEARDOWN_SCRIPT:-${DISPATCH_HOME}/dispatch/scripts/teardown.sh}"
 REVIEW_MERGE_SCRIPT="${DISPATCH_LOOP_REVIEW_MERGE_SCRIPT:-}"
@@ -39,23 +39,6 @@ die() {
   SUMMARY_STATUS="$status"
   if [ "$#" -gt 0 ]; then ERRORS+=("$*"); err "$*"; fi
   exit "$code"
-}
-
-claude_hours() {
-  python3 - "$CLAUDE_CREDENTIALS_FILE" <<'PY'
-import json
-import sys
-import time
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-exp = float(data["claudeAiOauth"]["expiresAt"])
-if exp > 10 ** 12:
-    exp /= 1000.0
-left = exp - time.time()
-print(f"{left / 3600:.1f}")
-raise SystemExit(0 if left > 3600 else 1)
-PY
 }
 
 emit_summary() {
@@ -133,17 +116,18 @@ validate_args() {
 }
 
 phase_a() {
-  local account_len hours
+  local account_len
   PHASES_RUN+=("A")
-  for cmd in awk find grep jq python3 sed tee; do need_cmd "$cmd"; done
+  for cmd in awk find grep jq sed stat tee; do need_cmd "$cmd"; done
   account_len=$(( ${#PROJECT} + 7 ))
   [ "${#PROJECT}" -le 25 ] || die 1 error "B29: --project '${PROJECT}' is too long. 'ccuser-${PROJECT}' would exceed the POSIX 32-char login limit."
   [ "$account_len" -le 32 ] || die 1 error "B29: project slug is too long for worker user creation. 'ccuser-${PROJECT}' would be ${account_len} chars; max is 32."
   rm -f -- "/tmp/${PROJECT}-${WORKER_NAME}-manifest.md" "/tmp/${PROJECT}-${WORKER_NAME}-merge-prompt.md" "/tmp/${PROJECT}-merge-prompt.md" "/tmp/${PROJECT}-dispatch.log" "/tmp/${PROJECT}-review.log" "/tmp/${PROJECT}-merge.log" "/tmp/${PROJECT}-loop-f1.log" "/tmp/${PROJECT}-loop-f2.log"
   [ -x "${SCRIPTS_DIR}/dispatch-pre.sh" ] || die 1 error "Missing or not executable: ${SCRIPTS_DIR}/dispatch-pre.sh"
   [ -x "$REVIEW_MERGE_SCRIPT" ] || die 1 error "Missing or not executable: $REVIEW_MERGE_SCRIPT"
-  hours="$(claude_hours)" || die 1 error "claudeuser credentials are unreadable or expire within 1h: $CLAUDE_CREDENTIALS_FILE"
-  log "Phase A (pre-flight): OK (project=${PROJECT}, user=ccuser-${PROJECT}, claude=${hours}h, scripts_dir=${SCRIPTS_DIR}, dry_run=${DRY_RUN})"
+  [ -r "$ANTHROPIC_KEY_FILE" ] || die 1 error "Anthropic API key not readable: $ANTHROPIC_KEY_FILE"
+  [ "$(stat -c '%a' "$ANTHROPIC_KEY_FILE")" = "600" ] || die 1 error "Anthropic API key must have mode 600: $ANTHROPIC_KEY_FILE"
+  log "Phase A (pre-flight): OK (project=${PROJECT}, user=ccuser-${PROJECT}, api_key=ok, scripts_dir=${SCRIPTS_DIR}, dry_run=${DRY_RUN})"
 }
 
 phase_b() {

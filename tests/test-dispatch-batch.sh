@@ -40,24 +40,17 @@ slug_from_dir() {
   printf '%s%s\n' "$prefix" "$suffix"
 }
 
-make_creds() {
+write_api_key() {
   local path="$1"
-  python3 - "$path" <<'PY'
-import json
-import sys
-import time
-
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump({"claudeAiOauth": {"expiresAt": int((time.time() + 7200) * 1000)}}, handle)
-PY
+  printf 'mock-anthropic-test-key-12345\n' >"$path"
+  chmod 600 "$path"
 }
 
 setup_worker_home() {
   local dir="$1" project="$2"
-  mkdir -p "${dir}/home/ccuser-${project}/.npm-global/bin" "${dir}/home/ccuser-${project}/.claude"
+  mkdir -p "${dir}/home/ccuser-${project}/.npm-global/bin"
   ln -sf "${dir}/bin/claude" "${dir}/home/ccuser-${project}/.npm-global/bin/claude"
   ln -sf "${dir}/bin/gh" "${dir}/home/ccuser-${project}/.npm-global/bin/gh"
-  make_creds "${dir}/home/ccuser-${project}/.claude/.credentials.json"
 }
 
 setup_fixture() {
@@ -80,7 +73,7 @@ setup_fixture() {
   printf '# worker 1\n' >"${dir}/manifests/worker-w1.md"
   printf '# worker 2\n' >"${dir}/manifests/worker-w2.md"
   printf '# worker 3\n' >"${dir}/manifests/worker-w3.md"
-  make_creds "${dir}/claude-credentials.json"
+  write_api_key "${dispatch_home}/.config/anthropic-api-key"
 
   cat >"${scripts_dir}/dispatch-pre.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -222,6 +215,10 @@ EOF
 
   cat >"${dir}/bin/claude" <<'EOF'
 #!/usr/bin/env bash
+[ "${ANTHROPIC_API_KEY:-}" = "mock-anthropic-test-key-12345" ] || {
+  printf 'missing ANTHROPIC_API_KEY\n' >&2
+  exit 97
+}
 printf '%s\n' '[{"session_id":"review-session-1","total_cost_usd":0.44,"result":"PR #1 MERGE_STATUS: merged\nPR #1 MERGED_SHA: cafe1234\nPR #2 MERGE_STATUS: skipped_non_pass\nPR #2 MERGED_SHA: none\nPR #3 MERGE_STATUS: skipped_non_pass\nPR #3 MERGED_SHA: none\nBATCH_STATUS: partial"}]'
 EOF
 
@@ -250,7 +247,7 @@ base_env() {
   printf '%s\0' \
     "PATH=${dir}/bin:${PATH}" \
     "DISPATCH_HOME=${dispatch_home}" \
-    "DISPATCH_BATCH_CLAUDE_CREDENTIALS_FILE=${dir}/claude-credentials.json" \
+    "DISPATCH_BATCH_ANTHROPIC_KEY_FILE=${dispatch_home}/.config/anthropic-api-key" \
     "DISPATCH_BATCH_STAGGER_SEC=0" \
     "DISPATCH_BATCH_TEST_HOME_ROOT=${dir}/home" \
     "GITHUB_TOKEN=dummy-token"

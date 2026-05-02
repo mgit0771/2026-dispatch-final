@@ -1,6 +1,6 @@
 # Architecture
 
-Stan: Phase 2 SSOT, 2026-05-02.
+Stan: Phase 3 SSOT, 2026-05-02.
 
 Repo centralizuje dispatch stack, a aktywny chain używa już runtime paths
 budowanych od `${DISPATCH_HOME}`.
@@ -95,6 +95,19 @@ Twarde reguły:
 - output ma być JSON / stream-json
 - `FAIL` nie może przejść do auto-merge
 
+## Model auth
+
+Od Phase 3 aktywny chain nie używa już `claudeuser` ani OAuth TTL checks.
+
+- jeden dispatcher ma jeden stateless `ANTHROPIC_API_KEY`
+- klucz żyje tylko w `${DISPATCH_HOME}/.config/anthropic-api-key`
+- plik musi być czytelny dla dispatchera i mieć mode `600`
+- review / merge przekazują klucz dalej wyłącznie przez env
+- worker users nie trzymają lokalnych kopii klucza pod `/home/ccuser-*`
+
+To upraszcza bootstrap, eliminuje problem wygasających credentiali i zmniejsza
+ryzyko stale copies.
+
 ## Model izolacji
 
 ### Phase 1
@@ -123,11 +136,20 @@ To daje docelowy model izolacji:
 - osobne headless roots i registries dla każdego dispatchera
 - dwa dispatchery mogą działać równolegle bez shared-state collisions
 
+### Phase 3
+
+Aktywny chain jest już auth-portable i bootstrap-complete:
+
+- `ccc-headless-task.sh` jest częścią repo i używa `${DISPATCH_HOME}` defaults
+- review / merge nie zależą od `/home/claudeuser/.claude/.credentials.json`
+- dispatcher przenosi jeden Anthropic key przez env do procesów uruchamianych
+  jako `ccuser-*`
+
 ## Co daje to repo
 
 - jeden kanoniczny dom dla skryptów, testów, playbooka i promptów
 - mniej szukania po VPS i disposable repos
-- solidny fundament pod Phase 2, 3 i 4
+- solidny fundament pod Phase 3 i 4
 
 To repo rozwiązuje problem source-of-truth. Kolejna faza ma rozwiązać pełną
 runtime portability.
