@@ -1,9 +1,9 @@
 # Architecture
 
-Stan: Phase 1 SSOT, 2026-05-02.
+Stan: Phase 2 SSOT, 2026-05-02.
 
-Repo centralizuje dispatch stack, ale pełna izolacja runtime po
-`${DISPATCH_HOME}` jest jeszcze celem Phase 2.
+Repo centralizuje dispatch stack, a aktywny chain używa już runtime paths
+budowanych od `${DISPATCH_HOME}`.
 
 ## 5 aktorów
 
@@ -107,15 +107,19 @@ Twarde reguły:
 - osobne registries
 - osobne katalogi logów i headless artifacts
 
-Ale część skryptów nadal zakłada legacy global paths, np. `/root/2026-loop/...`
-albo `/root/codex-headless/...`.
+To był fundament pod pełną parametryzację runtime paths w Phase 2.
 
-### Phase 2 target
+### Phase 2
 
-Pełna izolacja ma znaczyć:
+Aktywny chain (`dispatch-pre.sh` + hardened F2/F3/F4) ma teraz:
 
-- wszystkie runtime paths budowane od `${DISPATCH_HOME}`
-- brak obowiązkowych odwołań do wspólnego `/root/...`
+- `DISPATCH_HOME` jako required env guard
+- defaulty `dispatch/scripts`, `repos`, `.codex-headless`, `.ccc-headless`,
+  `logs`, `registries`, `.config` wyprowadzane z `${DISPATCH_HOME}`
+- brak obowiązkowych odwołań do wspólnego host-global path w aktywnych skryptach
+
+To daje docelowy model izolacji:
+
 - osobne headless roots i registries dla każdego dispatchera
 - dwa dispatchery mogą działać równolegle bez shared-state collisions
 

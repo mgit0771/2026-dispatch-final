@@ -1,6 +1,6 @@
 # 2026-dispatch-final
 
-CCC Dispatch Pipeline SSOT, Phase 1 of 4.
+CCC Dispatch Pipeline SSOT, Phase 2 of 4.
 
 This repository centralizes the current dispatch stack in one place:
 
@@ -12,23 +12,23 @@ This repository centralizes the current dispatch stack in one place:
 - reusable templates
 - `bootstrap.sh` for a new dispatcher account
 
-## Phase 1 Status
+## Phase 2 Status
 
-As of 2026-05-02 this repo is the canonical home for the artifacts, but runtime
-portability is not fully finished yet.
+As of 2026-05-02 this repo is the canonical home for the artifacts and the
+active dispatch chain now derives its runtime defaults from `${DISPATCH_HOME}`.
 
-- `scripts/` are copied as-is from the VPS.
 - `bootstrap.sh` prepares a per-dispatcher user, home, repo checkout, secret
   files, registries, and log directories.
-- Hardened F2/F3/F4 variants are included because they are the current best
-  runtime copies on the VPS.
-- Some legacy `/root/...` assumptions still exist, mainly around F1. Full
-  `${DISPATCH_HOME}` path refactor is Phase 2.
+- `scripts/dispatch-pre.sh` plus the hardened F2/F3/F4 variants require
+  `DISPATCH_HOME` and derive their default paths from the bootstrap layout.
+- Historical original scripts remain in `scripts/` as reference artifacts and
+  are intentionally untouched.
 
 Practical meaning:
 
-- current VPS / current environment: usable now
-- clean-room portability to any host: next phase
+- one dispatcher account = one `${DISPATCH_HOME}`
+- multi-instance setups can isolate repos, headless artifacts, logs, and
+  registries without shared host-global defaults in the active chain
 
 ## Quick Start
 
@@ -52,6 +52,7 @@ Requirements:
 After bootstrap:
 
 ```bash
+export DISPATCH_HOME=/home/dispatcher-alpha
 sudo -u dispatcher-alpha bash /home/dispatcher-alpha/dispatch/scripts/dispatch-loop-hardened.sh --help
 ```
 
@@ -71,7 +72,7 @@ sudo -u dispatcher-alpha bash /home/dispatcher-alpha/dispatch/scripts/dispatch-l
 ```
 
 - `scripts/` -> F1/F2/F3/F4 originals plus hardened F2/F3/F4
-- `tests/` -> copied shell tests from the VPS
+- `tests/` -> shell tests for the active dispatch chain
 - `playbook/` -> quick start, economics, decision rules, blocker summary
 - `templates/` -> worker manifest and CCC prompt templates
 - `agents/` -> fresh-agent cold-start prompt
@@ -80,7 +81,7 @@ sudo -u dispatcher-alpha bash /home/dispatcher-alpha/dispatch/scripts/dispatch-l
 
 ## Workflow
 
-Nominal Phase 1 path:
+Nominal Phase 2 path:
 
 1. Write a manifest from `templates/manifest-worker.md`.
 2. Write CCC review and merge prompts from `templates/ccc-*.md`.

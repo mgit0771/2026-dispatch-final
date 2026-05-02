@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${DISPATCH_HOME:?DISPATCH_HOME must be set}"
+
 SCRIPT_NAME="dispatch-review-merge-hardened"
 TARGET_PATH_BASE="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 
@@ -11,14 +13,16 @@ REVIEW_PROMPT_FILE=""
 MODE="gate"
 MAX_WAIT_SEC=1800
 TEARDOWN=0
-SCRIPTS_DIR="${DISPATCH_REVIEW_MERGE_SCRIPTS_DIR:-/root/2026-codex-app-dispatcher/COMP-LOOP-ENV/scripts}"
+SCRIPTS_DIR="${DISPATCH_REVIEW_MERGE_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"
 DRY_RUN=0
 
 CLAUDE_CREDENTIALS_FILE="${DISPATCH_REVIEW_MERGE_CLAUDE_CREDENTIALS_FILE:-/home/claudeuser/.claude/.credentials.json}"
 PROJECT_CLAUDE_MIN_HOURS="${DISPATCH_REVIEW_MERGE_PROJECT_CLAUDE_MIN_HOURS:-0.5}"
-LOOP_ROOT="${DISPATCH_REVIEW_MERGE_LOOP_ROOT:-/root/2026-loop}"
-CODEX_HEADLESS_ROOT="${DISPATCH_REVIEW_MERGE_CODEX_HEADLESS_ROOT:-/root/codex-headless}"
-TEARDOWN_SCRIPT="${DISPATCH_REVIEW_MERGE_TEARDOWN_SCRIPT:-/root/2026-loop/repo-comp-loop-env/scripts/teardown.sh}"
+LOOP_ROOT="${DISPATCH_REVIEW_MERGE_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
+CODEX_HEADLESS_ROOT="${DISPATCH_REVIEW_MERGE_CODEX_HEADLESS_ROOT:-${DISPATCH_HOME}/.codex-headless}"
+CCC_HEADLESS_ROOT="${DISPATCH_REVIEW_MERGE_CCC_HEADLESS_ROOT:-${DISPATCH_HOME}/.ccc-headless}"
+TEARDOWN_SCRIPT="${DISPATCH_REVIEW_MERGE_TEARDOWN_SCRIPT:-${DISPATCH_HOME}/dispatch/scripts/teardown.sh}"
+: "${CCC_HEADLESS_ROOT}"
 
 PROJECT_USER=""
 PROJECT_DIR=""
@@ -234,7 +238,7 @@ validate_args() {
   esac
 
   PROJECT_USER="ccuser-${PROJECT}"
-  PROJECT_DIR="${LOOP_ROOT}/repo-${PROJECT}"
+  PROJECT_DIR="${LOOP_ROOT}/${PROJECT}"
 }
 
 phase0() {
@@ -264,7 +268,7 @@ phase0() {
   id "$PROJECT_USER" >/dev/null 2>&1 || die 1 "Worker user not found: $PROJECT_USER"
   TARGET_HOME="$(lookup_user_home "$PROJECT_USER" || true)"
   [ -n "$TARGET_HOME" ] || die 1 "Unable to resolve home for $PROJECT_USER"
-  TARGET_PATH="${TARGET_HOME}/.npm-global/bin:/root/.npm-global/bin:${TARGET_PATH_BASE}"
+  TARGET_PATH="${TARGET_HOME}/.npm-global/bin:${DISPATCH_HOME}/.npm-global/bin:${TARGET_PATH_BASE}"
   origin_url="$(git -C "$PROJECT_DIR" config --get remote.origin.url 2>/dev/null || true)"
   origin_repo="$(normalize_origin_repo "$origin_url" || true)"
   [ -n "$origin_repo" ] || die 1 "Could not resolve remote.origin.url for $PROJECT_DIR"

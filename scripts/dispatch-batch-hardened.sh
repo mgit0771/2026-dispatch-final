@@ -2,6 +2,8 @@
 # shellcheck disable=SC2317,SC2030,SC2031
 set -euo pipefail
 
+: "${DISPATCH_HOME:?DISPATCH_HOME must be set}"
+
 SCRIPT_NAME="dispatch-batch-hardened"
 TARGET_PATH_BASE="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 
@@ -13,16 +15,18 @@ MODE="gate"
 MAX_PARALLEL=3
 MAX_WAIT_SEC=1800
 TEARDOWN=0
-SCRIPTS_DIR="${DISPATCH_BATCH_SCRIPTS_DIR:-/root/2026-ccc-dispatcher/scripts}"
+SCRIPTS_DIR="${DISPATCH_BATCH_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"
 DRY_RUN=0
 
 CLAUDE_CREDENTIALS_FILE="${DISPATCH_BATCH_CLAUDE_CREDENTIALS_FILE:-/home/claudeuser/.claude/.credentials.json}"
 PROJECT_CLAUDE_MIN_HOURS="${DISPATCH_BATCH_PROJECT_CLAUDE_MIN_HOURS:-0.5}"
-LOOP_ROOT="${DISPATCH_BATCH_LOOP_ROOT:-/root/2026-loop}"
-CODEX_HEADLESS_ROOT="${DISPATCH_BATCH_CODEX_HEADLESS_ROOT:-/root/codex-headless}"
-CCC_TASK_SCRIPT="${DISPATCH_BATCH_CCC_TASK_SCRIPT:-/root/2026-codex-app-dispatcher/COMP-LOOP-ENV/scripts/ccc-headless-task.sh}"
-TEARDOWN_SCRIPT="${DISPATCH_BATCH_TEARDOWN_SCRIPT:-/root/2026-loop/repo-comp-loop-env/scripts/teardown.sh}"
+LOOP_ROOT="${DISPATCH_BATCH_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
+CODEX_HEADLESS_ROOT="${DISPATCH_BATCH_CODEX_HEADLESS_ROOT:-${DISPATCH_HOME}/.codex-headless}"
+CCC_HEADLESS_ROOT="${DISPATCH_BATCH_CCC_HEADLESS_ROOT:-${DISPATCH_HOME}/.ccc-headless}"
+CCC_TASK_SCRIPT="${DISPATCH_BATCH_CCC_TASK_SCRIPT:-${SCRIPTS_DIR}/ccc-headless-task.sh}"
+TEARDOWN_SCRIPT="${DISPATCH_BATCH_TEARDOWN_SCRIPT:-${DISPATCH_HOME}/dispatch/scripts/teardown.sh}"
 STAGGER_SEC="${DISPATCH_BATCH_STAGGER_SEC:-5}"
+: "${CCC_HEADLESS_ROOT}"
 
 REVIEW_LOG=""
 REVIEW_PROMPT_RENDERED=""
@@ -291,7 +295,7 @@ latest_final_file() {
 }
 
 worker_is_running() {
-  pgrep -af -- "codex exec.*-C ${LOOP_ROOT}/repo-${1}/" >/dev/null 2>&1
+  pgrep -af -- "codex exec.*-C ${LOOP_ROOT}/${1}/" >/dev/null 2>&1
 }
 
 repo_origin_main_sha() {
@@ -331,11 +335,11 @@ select_batch_anchor() {
   BATCH_PATH=""
   ANCHOR_ERROR=""
 
-  if [ -d "${LOOP_ROOT}/repo-${PROJECT_PREFIX}" ]; then
+  if [ -d "${LOOP_ROOT}/${PROJECT_PREFIX}" ]; then
     BATCH_PROJECT="$PROJECT_PREFIX"
   else
     for worker in "${REVIEWABLE_WORKERS[@]}"; do
-      if [ -d "${LOOP_ROOT}/repo-${PROJECTS[$worker]}" ]; then
+      if [ -d "${LOOP_ROOT}/${PROJECTS[$worker]}" ]; then
         BATCH_PROJECT="${PROJECTS[$worker]}"
         break
       fi
@@ -353,7 +357,7 @@ select_batch_anchor() {
     ANCHOR_ERROR="Batch anchor home could not be resolved for ${BATCH_USER}."
     return 1
   }
-  BATCH_PATH="${BATCH_HOME}/.npm-global/bin:/root/.npm-global/bin:${TARGET_PATH_BASE}"
+  BATCH_PATH="${BATCH_HOME}/.npm-global/bin:${DISPATCH_HOME}/.npm-global/bin:${TARGET_PATH_BASE}"
 }
 
 check_worker_claude_auth() {
@@ -374,7 +378,7 @@ check_worker_claude_auth() {
       failed=1
       continue
     fi
-    target_path="${home}/.npm-global/bin:/root/.npm-global/bin:${TARGET_PATH_BASE}"
+    target_path="${home}/.npm-global/bin:${DISPATCH_HOME}/.npm-global/bin:${TARGET_PATH_BASE}"
     if ! sudo -u "$user" env HOME="$home" PATH="$target_path" bash -lc 'command -v claude >/dev/null 2>&1'; then
       add_error "Worker ${worker_num} claude CLI not available for ${user}."
       failed=1
@@ -399,7 +403,7 @@ build_review_context() {
     printf 'project: %s\n' "$project"
     printf 'worker: %s\n' "$worker"
     printf 'target_repo: %s\n' "${TARGET_REPOS[$worker]}"
-    printf 'local_repo: %s/repo-%s\n' "$LOOP_ROOT" "$project"
+    printf 'local_repo: %s/%s\n' "$LOOP_ROOT" "$project"
     printf 'branch: %s\n' "$branch"
     printf 'manifest_file: %s\n' "${MANIFEST_PATHS[$worker]}"
     printf 'final_file: %s\n' "${FINAL_FILES[$worker]}"
@@ -483,7 +487,7 @@ write_merge_prompt() {
       project="${PROJECTS[$worker]}"
       branch="worker/${project}-${worker}"
       printf '\nPR #%s merge steps:\n' "$num"
-      printf 'cd %s/repo-%s\n' "$LOOP_ROOT" "$project"
+      printf 'cd %s/%s\n' "$LOOP_ROOT" "$project"
       printf 'git fetch origin --prune\n'
       printf 'git checkout main && git pull origin main --ff-only\n'
       printf 'git merge --squash origin/%s\n' "$branch"
@@ -525,7 +529,7 @@ merge_status_for_pr() {
 capture_pre_merge_shas() {
   local worker="" repo="" sha=""
   for worker in "${PASS_WORKERS[@]}"; do
-    repo="${LOOP_ROOT}/repo-${PROJECTS[$worker]}"
+    repo="${LOOP_ROOT}/${PROJECTS[$worker]}"
     sha=""
     if [ -d "$repo" ]; then
       sha="$(repo_origin_main_sha "$repo" || true)"
@@ -550,7 +554,7 @@ merged_sha_for_pr() {
       return 0
       ;;
   esac
-  repo="${LOOP_ROOT}/repo-${PROJECTS[$worker]}"
+  repo="${LOOP_ROOT}/${PROJECTS[$worker]}"
   pre_sha="${PRE_MERGE_SHAS[$worker]:-}"
   if [ -n "$pre_sha" ] && [ -d "$repo" ]; then
     post_sha="$(repo_origin_main_sha "$repo" || true)"
@@ -760,7 +764,7 @@ run_batch_merge() {
   : >"$MERGE_LOG"
   printf -v merge_cmd \
     'cd %q && claude -p --resume %q --permission-mode bypassPermissions --output-format json --verbose < %q' \
-    "${LOOP_ROOT}/repo-${BATCH_PROJECT}" "$REVIEW_SESSION_ID" "$MERGE_PROMPT_RENDERED"
+    "${LOOP_ROOT}/${BATCH_PROJECT}" "$REVIEW_SESSION_ID" "$MERGE_PROMPT_RENDERED"
   nohup sudo -u "$BATCH_USER" env HOME="$BATCH_HOME" PATH="$BATCH_PATH" bash -c "$merge_cmd" >"$MERGE_LOG" 2>&1 &
   set +e
   wait "$!"
@@ -808,7 +812,7 @@ phase_d() {
     return 0
   fi
   select_batch_anchor || { add_error "${ANCHOR_ERROR:-Batch anchor selection failed.}"; return 5; }
-  [ -d "${LOOP_ROOT}/repo-${BATCH_PROJECT}" ] || { add_error "Batch anchor repo not found: ${LOOP_ROOT}/repo-${BATCH_PROJECT}."; return 5; }
+  [ -d "${LOOP_ROOT}/${BATCH_PROJECT}" ] || { add_error "Batch anchor repo not found: ${LOOP_ROOT}/${BATCH_PROJECT}."; return 5; }
   id "$BATCH_USER" >/dev/null 2>&1 || { add_error "Batch anchor user not found: ${BATCH_USER}."; return 5; }
   sudo -u "$BATCH_USER" env HOME="$BATCH_HOME" PATH="$BATCH_PATH" bash -lc 'command -v claude >/dev/null 2>&1' \
     || { add_error "claude CLI not available for batch anchor ${BATCH_USER}."; return 5; }
