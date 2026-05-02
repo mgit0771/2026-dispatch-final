@@ -1,6 +1,6 @@
 # 2026-dispatch-final
 
-CCC Dispatch Pipeline SSOT, Phase 2 of 4.
+CCC Dispatch Pipeline SSOT, Phase 3 of 4.
 
 This repository centralizes the current dispatch stack in one place:
 
@@ -12,7 +12,7 @@ This repository centralizes the current dispatch stack in one place:
 - reusable templates
 - `bootstrap.sh` for a new dispatcher account
 
-## Phase 2 Status
+## Phase 3 Status
 
 As of 2026-05-02 this repo is the canonical home for the artifacts and the
 active dispatch chain now derives its runtime defaults from `${DISPATCH_HOME}`.
@@ -21,6 +21,11 @@ active dispatch chain now derives its runtime defaults from `${DISPATCH_HOME}`.
   files, registries, and log directories.
 - `scripts/dispatch-pre.sh` plus the hardened F2/F3/F4 variants require
   `DISPATCH_HOME` and derive their default paths from the bootstrap layout.
+- `scripts/ccc-headless-task.sh` now lives in-repo and uses the same
+  dispatcher-scoped runtime layout as the hardened orchestrators.
+- Anthropic access in the active chain is now stateless: one dispatcher-owned
+  `${DISPATCH_HOME}/.config/anthropic-api-key` is validated at runtime and
+  injected via `ANTHROPIC_API_KEY`, with no per-user OAuth refresh/TTL path.
 - Historical original scripts remain in `scripts/` as reference artifacts and
   are intentionally untouched.
 

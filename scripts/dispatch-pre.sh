@@ -10,6 +10,7 @@ SCRIPTS_DIR="${DISPATCH_PRE_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"
 LOOP_ROOT="${DISPATCH_PRE_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
 CODEX_HEADLESS_ROOT="${DISPATCH_PRE_CODEX_HEADLESS_ROOT:-${DISPATCH_HOME}/.codex-headless}"
 CODEX_API_KEY_FILE="${DISPATCH_PRE_CODEX_API_KEY_FILE:-${DISPATCH_HOME}/.config/codex-api-key}"
+ANTHROPIC_KEY_FILE="${DISPATCH_PRE_ANTHROPIC_KEY_FILE:-${DISPATCH_HOME}/.config/anthropic-api-key}"
 OVERLAY="${DISPATCH_PRE_OVERLAY:-${SCRIPTS_DIR}/pre-dispatch-overlay-v2.sh}"
 DRY_RUN=0; REPO_URL=""; SETUP_LOG=""; MANIFEST_TMP=""; STAGING_DIR=""; DISPATCH_LOG=""; DISPATCH_PID=""
 
@@ -54,11 +55,6 @@ validate_args() {
   fi
 }
 
-claude_hours() {
-  python3 -c 'import json,sys,time; data=json.load(open(sys.argv[1], "r", encoding="utf-8")); exp=float(data["claudeAiOauth"]["expiresAt"]); exp=exp/1000.0 if exp > 10**12 else exp; rem=exp-time.time(); print(f"{rem/3600:.1f}"); raise SystemExit(0 if rem > 3600 else 1)' \
-    /home/claudeuser/.claude/.credentials.json
-}
-
 latest_headless_log() {
   local dir="${CODEX_HEADLESS_ROOT}/${PROJECT}/${WORKER_NAME}"
   [ -d "$dir" ] || return 1
@@ -74,13 +70,13 @@ need_gh_auth() {
 }
 
 phase0() {
-  local hours=""
   if [ "$DRY_RUN" -eq 1 ] && ! is_root; then
     log "Phase 0 (pre-flight): OK (dry-run, privileged checks skipped)"
     return 0
   fi
-  need_cmd python3; need_cmd grep; need_cmd stat; need_cmd systemctl
-  hours="$(claude_hours)" || die 1 "claudeuser credentials are unreadable or expire within 1h."
+  need_cmd grep; need_cmd stat; need_cmd systemctl
+  [ -r "$ANTHROPIC_KEY_FILE" ] || die 1 "Anthropic API key not readable: $ANTHROPIC_KEY_FILE"
+  [ "$(stat -c '%a' "$ANTHROPIC_KEY_FILE")" = "600" ] || die 1 "Anthropic API key must have mode 600: $ANTHROPIC_KEY_FILE"
   need_secret_file "$CODEX_API_KEY_FILE" "Codex API key file"
   [ -x "$OVERLAY" ] || die 1 "Overlay is missing or not executable: $OVERLAY"
   for file_name in setup-repo.sh setup-user.sh dispatch-worker.sh; do
@@ -89,7 +85,7 @@ phase0() {
   grep -Eq -- '--backend.*headless|headless.*--backend' "$SCRIPTS_DIR/dispatch-worker.sh" \
     || die 1 "dispatch-worker.sh does not advertise --backend headless support."
   systemctl is-active --quiet claude-cmd-api.service || die 1 "claude-cmd-api.service is not active."
-  log "Phase 0 (pre-flight): OK (claude=${hours}h, overlay=ok, services=active)"
+  log "Phase 0 (pre-flight): OK (api_key=ok, overlay=ok, services=active)"
 }
 
 phase1() {

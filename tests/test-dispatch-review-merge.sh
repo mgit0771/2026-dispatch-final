@@ -45,13 +45,17 @@ setup_fixture() {
     "${dispatch_home}/registries" \
     "${dispatch_home}/.config"
   printf '# review\n' >"${dir}/review.md"
+  printf 'mock-anthropic-test-key-12345\n' >"${dispatch_home}/.config/anthropic-api-key"
+  chmod 600 "${dispatch_home}/.config/anthropic-api-key"
   printf '%s\n' "$dispatch_home" >"${dir}/dispatch-home.txt"
 }
 
 base_env() {
   local dir="$1" dispatch_home=""
   dispatch_home="$(<"${dir}/dispatch-home.txt")"
-  printf '%s\0' "DISPATCH_HOME=${dispatch_home}"
+  printf '%s\0' \
+    "DISPATCH_HOME=${dispatch_home}" \
+    "DISPATCH_REVIEW_MERGE_ANTHROPIC_KEY_FILE=${dispatch_home}/.config/anthropic-api-key"
 }
 
 run_case_missing_dispatch_home() {

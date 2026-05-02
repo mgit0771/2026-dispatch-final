@@ -40,16 +40,10 @@ slug_from_dir() {
   printf '%s%s\n' "$prefix" "$suffix"
 }
 
-make_creds() {
+write_api_key() {
   local path="$1"
-  python3 - "$path" <<'PY'
-import json
-import sys
-import time
-
-with open(sys.argv[1], "w", encoding="utf-8") as handle:
-    json.dump({"claudeAiOauth": {"expiresAt": int((time.time() + 7200) * 1000)}}, handle)
-PY
+  printf 'mock-anthropic-test-key-12345\n' >"$path"
+  chmod 600 "$path"
 }
 
 setup_fixture() {
@@ -71,7 +65,7 @@ EOF
   cat >"${dir}/review.md" <<'EOF'
 # Review Prompt
 EOF
-  make_creds "${dir}/claude-credentials.json"
+  write_api_key "${dispatch_home}/.config/anthropic-api-key"
 
   cat >"${scripts_dir}/dispatch-pre.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -179,7 +173,7 @@ base_env() {
   dispatch_home="$(<"${dir}/dispatch-home.txt")"
   printf '%s\0' \
     "DISPATCH_HOME=${dispatch_home}" \
-    "DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE=${dir}/claude-credentials.json"
+    "DISPATCH_LOOP_ANTHROPIC_KEY_FILE=${dispatch_home}/.config/anthropic-api-key"
 }
 
 run_case_missing_dispatch_home() {

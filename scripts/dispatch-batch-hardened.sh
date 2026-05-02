@@ -18,8 +18,7 @@ TEARDOWN=0
 SCRIPTS_DIR="${DISPATCH_BATCH_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"
 DRY_RUN=0
 
-CLAUDE_CREDENTIALS_FILE="${DISPATCH_BATCH_CLAUDE_CREDENTIALS_FILE:-/home/claudeuser/.claude/.credentials.json}"
-PROJECT_CLAUDE_MIN_HOURS="${DISPATCH_BATCH_PROJECT_CLAUDE_MIN_HOURS:-0.5}"
+ANTHROPIC_KEY_FILE="${DISPATCH_BATCH_ANTHROPIC_KEY_FILE:-${DISPATCH_HOME}/.config/anthropic-api-key}"
 LOOP_ROOT="${DISPATCH_BATCH_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
 CODEX_HEADLESS_ROOT="${DISPATCH_BATCH_CODEX_HEADLESS_ROOT:-${DISPATCH_HOME}/.codex-headless}"
 CCC_HEADLESS_ROOT="${DISPATCH_BATCH_CCC_HEADLESS_ROOT:-${DISPATCH_HOME}/.ccc-headless}"
@@ -93,42 +92,6 @@ lookup_user_home() {
   passwd_entry="$(getent passwd "$user_name" || true)"
   [ -n "$passwd_entry" ] || return 1
   printf '%s\n' "$passwd_entry" | cut -d: -f6
-}
-
-claude_hours() {
-  python3 - "$CLAUDE_CREDENTIALS_FILE" <<'PY'
-import json
-import sys
-import time
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-exp = float(data["claudeAiOauth"]["expiresAt"])
-if exp > 10 ** 12:
-    exp /= 1000.0
-left = exp - time.time()
-print(f"{left / 3600:.1f}")
-raise SystemExit(0 if left > 3600 else 1)
-PY
-}
-
-project_claude_hours() {
-  sudo -u "$1" env HOME="$2" python3 - "$2/.claude/.credentials.json" "$PROJECT_CLAUDE_MIN_HOURS" <<'PY'
-import json
-import sys
-import time
-
-path = sys.argv[1]
-threshold_hours = float(sys.argv[2])
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-exp = float(data["claudeAiOauth"]["expiresAt"])
-if exp > 10 ** 12:
-    exp /= 1000.0
-left = exp - time.time()
-print(f"{left / 3600:.1f}")
-raise SystemExit(0 if left > threshold_hours * 3600 else 1)
-PY
 }
 
 json_object_from_log() {
@@ -360,7 +323,7 @@ select_batch_anchor() {
   BATCH_PATH="${BATCH_HOME}/.npm-global/bin:${DISPATCH_HOME}/.npm-global/bin:${TARGET_PATH_BASE}"
 }
 
-check_worker_claude_auth() {
+check_worker_claude_cli() {
   local worker="" worker_num="" project="" user="" home="" target_path="" failed=0
 
   for worker in "${WORKERS[@]}"; do
@@ -381,11 +344,6 @@ check_worker_claude_auth() {
     target_path="${home}/.npm-global/bin:${DISPATCH_HOME}/.npm-global/bin:${TARGET_PATH_BASE}"
     if ! sudo -u "$user" env HOME="$home" PATH="$target_path" bash -lc 'command -v claude >/dev/null 2>&1'; then
       add_error "Worker ${worker_num} claude CLI not available for ${user}."
-      failed=1
-      continue
-    fi
-    if ! project_claude_hours "$user" "$home" >/dev/null 2>&1; then
-      add_error "Worker ${worker_num} Claude auth not fresh (>0.5h required)."
       failed=1
     fi
   done
@@ -608,9 +566,8 @@ collect_manifests() {
 }
 
 phase_a() {
-  local hours=""
   PHASES_RUN+=("A")
-  for cmd in find grep jq python3 sed sort; do need_cmd "$cmd"; done
+  for cmd in find grep jq sed sort stat; do need_cmd "$cmd"; done
   collect_manifests
   rm -f -- \
     /tmp/"${PROJECT_PREFIX}"-w*-manifest.md \
@@ -627,13 +584,14 @@ phase_a() {
   [ -x "${SCRIPTS_DIR}/dispatch-review-merge-hardened.sh" ] || die 1 "Missing or not executable: ${SCRIPTS_DIR}/dispatch-review-merge-hardened.sh"
   [ -x "${SCRIPTS_DIR}/dispatch-loop-hardened.sh" ] || die 1 "Missing or not executable: ${SCRIPTS_DIR}/dispatch-loop-hardened.sh"
   [ -x "$CCC_TASK_SCRIPT" ] || die 1 "Missing or not executable: $CCC_TASK_SCRIPT"
-  hours="$(claude_hours)" || die 1 "claudeuser credentials are unreadable or expire within 1h: $CLAUDE_CREDENTIALS_FILE"
+  [ -r "$ANTHROPIC_KEY_FILE" ] || die 1 "Anthropic API key not readable: $ANTHROPIC_KEY_FILE"
+  [ "$(stat -c '%a' "$ANTHROPIC_KEY_FILE")" = "600" ] || die 1 "Anthropic API key must have mode 600: $ANTHROPIC_KEY_FILE"
   if [ "$DRY_RUN" -eq 0 ]; then
     is_root || die 1 "Run as root for live batch dispatch, or add --dry-run."
     for cmd in claude gh git pgrep sudo; do need_cmd "$cmd"; done
     need_gh_auth
   fi
-  log "Phase A (pre-flight): manifests=${#WORKERS[@]} mode=${MODE} max_parallel=${MAX_PARALLEL} claude=${hours}h"
+  log "Phase A (pre-flight): manifests=${#WORKERS[@]} mode=${MODE} max_parallel=${MAX_PARALLEL} api_key=ok"
 }
 
 wait_f1_batch() {
@@ -757,7 +715,7 @@ phase_c() {
 }
 
 run_batch_merge() {
-  local merge_cmd="" merge_status=0 worker="" raw_status="" sha=""
+  local merge_cmd="" merge_status=0 worker="" raw_status="" sha="" api_key=""
   capture_pre_merge_shas
   write_merge_prompt
   MERGE_LOG="/tmp/${PROJECT_PREFIX}-batch-merge.log"
@@ -765,7 +723,8 @@ run_batch_merge() {
   printf -v merge_cmd \
     'cd %q && claude -p --resume %q --permission-mode bypassPermissions --output-format json --verbose < %q' \
     "${LOOP_ROOT}/${BATCH_PROJECT}" "$REVIEW_SESSION_ID" "$MERGE_PROMPT_RENDERED"
-  nohup sudo -u "$BATCH_USER" env HOME="$BATCH_HOME" PATH="$BATCH_PATH" bash -c "$merge_cmd" >"$MERGE_LOG" 2>&1 &
+  api_key="$(<"$ANTHROPIC_KEY_FILE")"
+  nohup sudo -u "$BATCH_USER" env HOME="$BATCH_HOME" PATH="$BATCH_PATH" ANTHROPIC_API_KEY="$api_key" bash -c "$merge_cmd" >"$MERGE_LOG" 2>&1 &
   set +e
   wait "$!"
   merge_status=$?
@@ -818,7 +777,7 @@ phase_d() {
     || { add_error "claude CLI not available for batch anchor ${BATCH_USER}."; return 5; }
   sudo -u "$BATCH_USER" env HOME="$BATCH_HOME" PATH="$BATCH_PATH" gh auth status --hostname github.com >/dev/null 2>&1 \
     || { add_error "gh CLI is not authenticated for batch anchor ${BATCH_USER}."; return 5; }
-  check_worker_claude_auth || return 5
+  check_worker_claude_cli || return 5
   write_review_prompt
   REVIEW_LOG="/tmp/${PROJECT_PREFIX}-batch-review.log"
   : >"$REVIEW_LOG"

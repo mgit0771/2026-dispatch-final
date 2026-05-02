@@ -16,8 +16,7 @@ TEARDOWN=0
 SCRIPTS_DIR="${DISPATCH_REVIEW_MERGE_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"
 DRY_RUN=0
 
-CLAUDE_CREDENTIALS_FILE="${DISPATCH_REVIEW_MERGE_CLAUDE_CREDENTIALS_FILE:-/home/claudeuser/.claude/.credentials.json}"
-PROJECT_CLAUDE_MIN_HOURS="${DISPATCH_REVIEW_MERGE_PROJECT_CLAUDE_MIN_HOURS:-0.5}"
+ANTHROPIC_KEY_FILE="${DISPATCH_REVIEW_MERGE_ANTHROPIC_KEY_FILE:-${DISPATCH_HOME}/.config/anthropic-api-key}"
 LOOP_ROOT="${DISPATCH_REVIEW_MERGE_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
 CODEX_HEADLESS_ROOT="${DISPATCH_REVIEW_MERGE_CODEX_HEADLESS_ROOT:-${DISPATCH_HOME}/.codex-headless}"
 CCC_HEADLESS_ROOT="${DISPATCH_REVIEW_MERGE_CCC_HEADLESS_ROOT:-${DISPATCH_HOME}/.ccc-headless}"
@@ -71,48 +70,6 @@ positive_integer() {
       [ "$1" -gt 0 ]
       ;;
   esac
-}
-
-hours_left_for_credentials() {
-  python3 - "$1" "$2" <<'PY'
-import json
-import sys
-import time
-
-path = sys.argv[1]
-threshold_hours = float(sys.argv[2])
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-exp = float(data["claudeAiOauth"]["expiresAt"])
-if exp > 10 ** 12:
-    exp /= 1000.0
-left = exp - time.time()
-print(f"{left / 3600:.1f}")
-raise SystemExit(0 if left > threshold_hours * 3600 else 1)
-PY
-}
-
-claude_hours() {
-  hours_left_for_credentials "$CLAUDE_CREDENTIALS_FILE" 1
-}
-
-project_claude_hours() {
-  sudo -u "$PROJECT_USER" env HOME="$TARGET_HOME" python3 - "${TARGET_HOME}/.claude/.credentials.json" "$PROJECT_CLAUDE_MIN_HOURS" <<'PY'
-import json
-import sys
-import time
-
-path = sys.argv[1]
-threshold_hours = float(sys.argv[2])
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-exp = float(data["claudeAiOauth"]["expiresAt"])
-if exp > 10 ** 12:
-    exp /= 1000.0
-left = exp - time.time()
-print(f"{left / 3600:.1f}")
-raise SystemExit(0 if left > threshold_hours * 3600 else 1)
-PY
 }
 
 normalize_origin_repo() {
@@ -242,7 +199,7 @@ validate_args() {
 }
 
 phase0() {
-  local hours="" project_hours="" origin_url="" origin_repo=""
+  local origin_url="" origin_repo=""
 
   if [ "$DRY_RUN" -eq 1 ]; then
     log "Phase 0 (pre-flight): DRY-RUN, validated flags and prompt path"
@@ -256,12 +213,12 @@ phase0() {
   need_cmd grep
   need_cmd jq
   need_cmd pgrep
-  need_cmd python3
   need_cmd stat
   need_cmd sudo
   need_cmd claude
 
-  hours="$(claude_hours)" || die 1 "claudeuser credentials are unreadable or expire within 1h."
+  [ -r "$ANTHROPIC_KEY_FILE" ] || die 1 "Anthropic API key not readable: $ANTHROPIC_KEY_FILE"
+  [ "$(stat -c '%a' "$ANTHROPIC_KEY_FILE")" = "600" ] || die 1 "Anthropic API key must have mode 600: $ANTHROPIC_KEY_FILE"
   [ -f "${SCRIPTS_DIR}/ccc-headless-task.sh" ] || die 1 "Missing ccc-headless-task.sh under ${SCRIPTS_DIR}"
   [ -d "$PROJECT_DIR" ] || die 1 "Trusted project repo not found: $PROJECT_DIR"
   [ -e "${PROJECT_DIR}/.git" ] || die 1 "Trusted project repo is missing .git metadata: $PROJECT_DIR"
@@ -278,9 +235,7 @@ phase0() {
     || die 1 "claude CLI not available for $PROJECT_USER"
   sudo -u "$PROJECT_USER" env HOME="$TARGET_HOME" PATH="$TARGET_PATH" gh auth status --hostname github.com >/dev/null 2>&1 \
     || die 1 "gh CLI is not authenticated for $PROJECT_USER"
-  project_hours="$(project_claude_hours)" \
-    || die 1 "Project Claude credentials for ${PROJECT_USER} are unreadable or expire within ${PROJECT_CLAUDE_MIN_HOURS}h."
-  log "Phase 0 (pre-flight): OK (claude=${hours}h, project_claude=${project_hours}h, repo=${TARGET_REPO}, user=${PROJECT_USER}, mode=${MODE}, teardown=${TEARDOWN})"
+  log "Phase 0 (pre-flight): OK (api_key=ok, repo=${TARGET_REPO}, user=${PROJECT_USER}, mode=${MODE}, teardown=${TEARDOWN})"
 }
 
 phase7() {
@@ -377,7 +332,7 @@ phase8() {
 }
 
 write_merge_prompt() {
-  MERGE_PROMPT_FILE="/tmp/${PROJECT}-merge-prompt.md"
+  MERGE_PROMPT_FILE="/tmp/${PROJECT}-${WORKER_NAME}-merge-prompt.md"
 
   cat >"$MERGE_PROMPT_FILE" <<EOF
 Verdict was ${REVIEW_VERDICT}. Authorized merge.
@@ -395,7 +350,7 @@ EOF
 }
 
 phase9() {
-  local merge_pid="" merge_status_code=0 merge_json="" merge_result="" merge_cmd="" is_error=""
+  local merge_pid="" merge_status_code=0 merge_json="" merge_result="" merge_cmd="" is_error="" api_key=""
 
   MERGE_LOG="/tmp/${PROJECT}-merge.log"
 
@@ -416,7 +371,8 @@ phase9() {
   printf -v merge_cmd \
     'cd %q && claude -p --resume %q --permission-mode bypassPermissions --output-format json --verbose < %q' \
     "$PROJECT_DIR" "$REVIEW_SESSION_ID" "$MERGE_PROMPT_FILE"
-  nohup sudo -u "$PROJECT_USER" env HOME="$TARGET_HOME" PATH="$TARGET_PATH" bash -c "$merge_cmd" >"$MERGE_LOG" 2>&1 &
+  api_key="$(<"$ANTHROPIC_KEY_FILE")"
+  nohup sudo -u "$PROJECT_USER" env HOME="$TARGET_HOME" PATH="$TARGET_PATH" ANTHROPIC_API_KEY="$api_key" bash -c "$merge_cmd" >"$MERGE_LOG" 2>&1 &
   merge_pid=$!
 
   set +e
