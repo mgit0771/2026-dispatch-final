@@ -1,9 +1,13 @@
 # Architecture
 
-Stan: Phase 3 SSOT, 2026-05-02.
+Stan: Phase 4a SSOT gap fix, 2026-05-02.
 
 Repo centralizuje dispatch stack, a aktywny chain używa już runtime paths
 budowanych od `${DISPATCH_HOME}`.
+
+W Phase 4a do repo dochodzi pełny helper chain wymagany przez `dispatch-pre.sh`,
+więc bootstrap-based dispatcher nie musi już dobierać skryptów z osobnych VPS
+lokacji.
 
 ## 5 aktorów
 
@@ -62,19 +66,25 @@ To jest ważniejsze niż sam tmux session.
 
 ```text
 manifest
-  -> F3 / dispatch-loop-hardened.sh
-  -> F1 / pre-flight + setup + dispatch
+  -> dispatch-loop-hardened.sh
+  -> dispatch-pre.sh
+  -> setup-repo.sh
+  -> setup-user.sh
+  -> pre-dispatch-overlay-v2.sh
+  -> dispatch-worker.sh --backend headless
   -> worker branch + PR
-  -> F2 / wait + CCC review + CCC merge
+  -> dispatch-review-merge-hardened.sh
   -> final JSON summary
 ```
 
 1. Operator pisze manifest i review prompt.
-2. Orchestrator dispatchuje workera.
-3. Worker robi zmiany i otwiera PR.
-4. CCC zwraca `VERDICT: PASS|WARN|FAIL`.
-5. Ten sam session_id jest wznawiany do merge.
-6. Orchestrator zapisuje `MERGED_SHA`, cost i status.
+2. `dispatch-pre.sh` uruchamia kompletny setup i overlay z helperów w tym repo.
+3. `dispatch-worker.sh` uruchamia workera headless i zapisuje artifacts pod
+   `${DISPATCH_HOME}`.
+4. Worker robi zmiany i otwiera PR.
+5. CCC zwraca `VERDICT: PASS|WARN|FAIL`.
+6. Ten sam session_id jest wznawiany do merge.
+7. Orchestrator zapisuje `MERGED_SHA`, cost i status.
 
 ## Multi-turn CCC mechanics
 
@@ -149,7 +159,8 @@ Aktywny chain jest już auth-portable i bootstrap-complete:
 
 - jeden kanoniczny dom dla skryptów, testów, playbooka i promptów
 - mniej szukania po VPS i disposable repos
-- solidny fundament pod Phase 3 i 4
+- pełny production helper chain w jednym checkout
+- solidny fundament pod live parallel test z bootstrap-only dispatchera
 
 To repo rozwiązuje problem source-of-truth. Kolejna faza ma rozwiązać pełną
 runtime portability.
