@@ -1,6 +1,6 @@
 # 2026-dispatch-final
 
-CCC Dispatch Pipeline SSOT, Phase 3 of 4.
+CCC Dispatch Pipeline SSOT, Phase 4a gap fix.
 
 This repository centralizes the current dispatch stack in one place:
 
@@ -12,7 +12,7 @@ This repository centralizes the current dispatch stack in one place:
 - reusable templates
 - `bootstrap.sh` for a new dispatcher account
 
-## Phase 3 Status
+## Phase 4a Status
 
 As of 2026-05-02 this repo is the canonical home for the artifacts and the
 active dispatch chain now derives its runtime defaults from `${DISPATCH_HOME}`.
@@ -21,6 +21,10 @@ active dispatch chain now derives its runtime defaults from `${DISPATCH_HOME}`.
   files, registries, and log directories.
 - `scripts/dispatch-pre.sh` plus the hardened F2/F3/F4 variants require
   `DISPATCH_HOME` and derive their default paths from the bootstrap layout.
+- `scripts/` now includes the full production helper chain required by
+  `dispatch-pre.sh`: `pre-dispatch-overlay-v2.sh`, `setup-repo.sh`,
+  `setup-user.sh`, and `dispatch-worker.sh` all live in-repo and default to
+  dispatcher-scoped `${DISPATCH_HOME}` paths.
 - `scripts/ccc-headless-task.sh` now lives in-repo and uses the same
   dispatcher-scoped runtime layout as the hardened orchestrators.
 - Anthropic access in the active chain is now stateless: one dispatcher-owned
@@ -76,7 +80,10 @@ sudo -u dispatcher-alpha bash /home/dispatcher-alpha/dispatch/scripts/dispatch-l
 └── docs/
 ```
 
-- `scripts/` -> F1/F2/F3/F4 originals plus hardened F2/F3/F4
+- `scripts/` -> 12 production shell scripts: F1/F2/F3/F4 originals, hardened
+  F2/F3/F4, `ccc-headless-task.sh`, and the copied helper chain
+  (`pre-dispatch-overlay-v2.sh`, `setup-repo.sh`, `setup-user.sh`,
+  `dispatch-worker.sh`)
 - `tests/` -> shell tests for the active dispatch chain
 - `playbook/` -> quick start, economics, decision rules, blocker summary
 - `templates/` -> worker manifest and CCC prompt templates
@@ -86,16 +93,19 @@ sudo -u dispatcher-alpha bash /home/dispatcher-alpha/dispatch/scripts/dispatch-l
 
 ## Workflow
 
-Nominal Phase 2 path:
+Nominal bootstrap-based path:
 
 1. Write a manifest from `templates/manifest-worker.md`.
 2. Write CCC review and merge prompts from `templates/ccc-*.md`.
 3. Run one of the orchestrators:
    - `scripts/dispatch-loop-hardened.sh` for one worker / one PR
    - `scripts/dispatch-batch-hardened.sh` for parallel workers / batch CCC
-4. Worker opens PR(s).
-5. CCC reviews in Turn 1 and merges in Turn 2 on the same session.
-6. Operator reads the final JSON summary and archives the run.
+4. `scripts/dispatch-pre.sh` resolves the in-repo helper chain:
+   `setup-repo.sh` -> `setup-user.sh` -> `pre-dispatch-overlay-v2.sh` ->
+   `dispatch-worker.sh --backend headless`.
+5. Worker opens PR(s).
+6. CCC reviews in Turn 1 and merges in Turn 2 on the same session.
+7. Operator reads the final JSON summary and archives the run.
 
 ## Cost Snapshot
 
