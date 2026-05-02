@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="${ROOT_DIR}/scripts/dispatch-loop.sh"
+SCRIPT="${ROOT_DIR}/scripts/dispatch-loop-hardened.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -17,9 +17,9 @@ assert_status() {
 assert_contains() {
   local file="$1" needle="$2" label="$3"
   grep -Fq -- "$needle" "$file" || {
-    printf '--- output (%s) ---\n' "$label" >&2
+    printf -- '--- output (%s) ---\n' "$label" >&2
     cat "$file" >&2
-    printf '--------------------\n' >&2
+    printf -- '--------------------\n' >&2
     fail "${label}: expected output to contain: ${needle}"
   }
 }
@@ -31,6 +31,13 @@ run_capture() {
   "$@" >"$outfile" 2>&1
   RUN_STATUS=$?
   set -e
+}
+
+slug_from_dir() {
+  local dir="$1" prefix="$2" suffix=""
+  suffix="$(basename "$dir" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+  suffix="${suffix:0:10}"
+  printf '%s%s\n' "$prefix" "$suffix"
 }
 
 make_creds() {
@@ -46,9 +53,18 @@ PY
 }
 
 setup_fixture() {
-  local dir="$1"
+  local dir="$1" dispatch_home="" scripts_dir=""
+  dispatch_home="${dir}/dispatcher-test"
+  scripts_dir="${dispatch_home}/dispatch/scripts"
 
-  mkdir -p "${dir}/scripts" "${dir}/loop-root"
+  mkdir -p \
+    "${scripts_dir}" \
+    "${dispatch_home}/repos" \
+    "${dispatch_home}/.codex-headless" \
+    "${dispatch_home}/.ccc-headless" \
+    "${dispatch_home}/logs" \
+    "${dispatch_home}/registries" \
+    "${dispatch_home}/.config"
   cat >"${dir}/manifest.md" <<'EOF'
 # Worker Manifest
 EOF
@@ -57,7 +73,7 @@ EOF
 EOF
   make_creds "${dir}/claude-credentials.json"
 
-  cat >"${dir}/scripts/dispatch-pre.sh" <<'EOF'
+  cat >"${scripts_dir}/dispatch-pre.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -88,7 +104,7 @@ printf '[dispatch-pre] Phase 0 (pre-flight): %s\n' "$([ "$dry_run" -eq 1 ] && pr
 printf '[dispatch-pre] Phase 7 (verify): thread_id=%s, codex live\n' "${MOCK_F1_THREAD_ID:-thread-mock-123}"
 EOF
 
-  cat >"${dir}/scripts/dispatch-review-merge.sh" <<'EOF'
+  cat >"${scripts_dir}/dispatch-review-merge-hardened.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -109,7 +125,7 @@ done
 
 case "${MOCK_F2_MODE:-success}" in
   success)
-    printf '[dispatch-review-merge] Phase 7 (wait worker DONE): %s\n' "$([ "$dry_run" -eq 1 ] && printf 'DRY-RUN' || printf 'worker complete')"
+    printf '[dispatch-review-merge-hardened] Phase 7 (wait worker DONE): %s\n' "$([ "$dry_run" -eq 1 ] && printf 'DRY-RUN' || printf 'worker complete')"
     printf 'review_verdict=PASS\n'
     printf 'review_session_id=review-session-1\n'
     printf 'review_cost_usd=1.5\n'
@@ -128,24 +144,25 @@ JSON
     printf 'review_verdict=PASS\n'
     printf 'review_session_id=review-session-1\n'
     printf 'review_cost_usd=1.25\n'
-    printf '[dispatch-review-merge] ERROR: Could not find JSON output in /tmp/%s-merge.log.\n' "$project" >&2
+    printf '[dispatch-review-merge-hardened] ERROR: Could not find JSON output in /tmp/%s-merge.log.\n' "$project" >&2
     exit 6
     ;;
   worker_crash)
-    mkdir -p "${DISPATCH_LOOP_LOOP_ROOT}/repo-${project}/.letta/worktrees/worker-${project}-${worker}"
-    printf 'partial work\n' >"${DISPATCH_LOOP_LOOP_ROOT}/repo-${project}/.letta/worktrees/worker-${project}-${worker}/notes.txt"
+    mkdir -p "${DISPATCH_HOME}/repos/${project}/.letta/worktrees/worker-${project}-${worker}"
+    printf 'partial work\n' >"${DISPATCH_HOME}/repos/${project}/.letta/worktrees/worker-${project}-${worker}/notes.txt"
     sleep 1
-    printf '[dispatch-review-merge] ERROR: Worker process is gone but no non-empty final output was found under /root/codex-headless/%s/%s.\n' "$project" "$worker" >&2
+    printf '[dispatch-review-merge-hardened] ERROR: Worker process is gone but no non-empty final output was found under %s/.codex-headless/%s/%s.\n' "$DISPATCH_HOME" "$project" "$worker" >&2
     exit 4
     ;;
   *)
-    printf '[dispatch-review-merge] ERROR: unsupported MOCK_F2_MODE=%s\n' "${MOCK_F2_MODE:-unknown}" >&2
+    printf '[dispatch-review-merge-hardened] ERROR: unsupported MOCK_F2_MODE=%s\n' "${MOCK_F2_MODE:-unknown}" >&2
     exit 99
     ;;
 esac
 EOF
 
-  chmod +x "${dir}/scripts/dispatch-pre.sh" "${dir}/scripts/dispatch-review-merge.sh"
+  chmod +x "${scripts_dir}/dispatch-pre.sh" "${scripts_dir}/dispatch-review-merge-hardened.sh"
+  printf '%s\n' "$dispatch_home" >"${dir}/dispatch-home.txt"
 }
 
 base_args() {
@@ -154,20 +171,46 @@ base_args() {
     --project "$project" \
     --manifest-file "${dir}/manifest.md" \
     --target-repo owner/repo \
-    --review-prompt-file "${dir}/review.md" \
-    --scripts-dir "${dir}/scripts"
+    --review-prompt-file "${dir}/review.md"
 }
 
-run_case_dry_run() {
+base_env() {
+  local dir="$1" dispatch_home=""
+  dispatch_home="$(<"${dir}/dispatch-home.txt")"
+  printf '%s\0' \
+    "DISPATCH_HOME=${dispatch_home}" \
+    "DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE=${dir}/claude-credentials.json"
+}
+
+run_case_missing_dispatch_home() {
   local dir out
   dir="$(mktemp -d)"
   out="${dir}/out.txt"
-  setup_fixture "$dir"
+  printf '# Worker Manifest\n' >"${dir}/manifest.md"
+  printf '# Review Prompt\n' >"${dir}/review.md"
 
-  mapfile -d '' -t args < <(base_args "$dir" dryrunproj)
+  run_capture "$out" bash "$SCRIPT" \
+    --dry-run \
+    --project dryrunproj \
+    --manifest-file "${dir}/manifest.md" \
+    --target-repo owner/repo \
+    --review-prompt-file "${dir}/review.md"
+
+  assert_status "$RUN_STATUS" 1 "missing-dispatch-home"
+  assert_contains "$out" "DISPATCH_HOME must be set" "missing-dispatch-home"
+}
+
+run_case_dry_run() {
+  local dir out project
+  dir="$(mktemp -d)"
+  out="${dir}/out.txt"
+  setup_fixture "$dir"
+  project="$(slug_from_dir "$dir" loopdry)"
+
+  mapfile -d '' -t args < <(base_args "$dir" "$project")
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
-    DISPATCH_LOOP_LOOP_ROOT="${dir}/loop-root" \
+    "${env_args[@]}" \
     MOCK_F1_MODE=success \
     MOCK_F2_MODE=success \
     bash "$SCRIPT" "${args[@]}" --dry-run
@@ -183,31 +226,32 @@ run_case_missing_project() {
   out="${dir}/out.txt"
   setup_fixture "$dir"
 
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
+    "${env_args[@]}" \
     bash "$SCRIPT" \
     --manifest-file "${dir}/manifest.md" \
     --target-repo owner/repo \
-    --review-prompt-file "${dir}/review.md" \
-    --scripts-dir "${dir}/scripts"
+    --review-prompt-file "${dir}/review.md"
 
   assert_status "$RUN_STATUS" 1 "missing-project"
   assert_contains "$out" "--project is required." "missing-project"
 }
 
 run_case_missing_manifest() {
-  local dir out
+  local dir out project
   dir="$(mktemp -d)"
   out="${dir}/out.txt"
   setup_fixture "$dir"
+  project="$(slug_from_dir "$dir" loopman)"
 
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
+    "${env_args[@]}" \
     bash "$SCRIPT" \
-    --project missingmanifest \
+    --project "$project" \
     --target-repo owner/repo \
-    --review-prompt-file "${dir}/review.md" \
-    --scripts-dir "${dir}/scripts"
+    --review-prompt-file "${dir}/review.md"
 
   assert_status "$RUN_STATUS" 1 "missing-manifest"
   assert_contains "$out" "--manifest-file is required." "missing-manifest"
@@ -220,8 +264,9 @@ run_case_b29() {
   setup_fixture "$dir"
 
   mapfile -d '' -t args < <(base_args "$dir" abcdefghijklmnopqrstuvwxyz)
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
+    "${env_args[@]}" \
     bash "$SCRIPT" "${args[@]}"
 
   assert_status "$RUN_STATUS" 1 "b29"
@@ -229,15 +274,16 @@ run_case_b29() {
 }
 
 run_case_f1_failure() {
-  local dir out
+  local dir out project
   dir="$(mktemp -d)"
   out="${dir}/out.txt"
   setup_fixture "$dir"
+  project="$(slug_from_dir "$dir" loopf1)"
 
-  mapfile -d '' -t args < <(base_args "$dir" f1failproj)
+  mapfile -d '' -t args < <(base_args "$dir" "$project")
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
-    DISPATCH_LOOP_LOOP_ROOT="${dir}/loop-root" \
+    "${env_args[@]}" \
     MOCK_F1_MODE=fail \
     bash "$SCRIPT" "${args[@]}"
 
@@ -246,15 +292,16 @@ run_case_f1_failure() {
 }
 
 run_case_b30_recovery() {
-  local dir out
+  local dir out project
   dir="$(mktemp -d)"
   out="${dir}/out.txt"
   setup_fixture "$dir"
+  project="$(slug_from_dir "$dir" loopb30)"
 
-  mapfile -d '' -t args < <(base_args "$dir" b30recoverproj)
+  mapfile -d '' -t args < <(base_args "$dir" "$project")
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
-    DISPATCH_LOOP_LOOP_ROOT="${dir}/loop-root" \
+    "${env_args[@]}" \
     MOCK_F1_MODE=success \
     MOCK_F2_MODE=b30 \
     bash "$SCRIPT" "${args[@]}"
@@ -265,15 +312,17 @@ run_case_b30_recovery() {
 }
 
 run_case_worker_crash() {
-  local dir out
+  local dir out dispatch_home project
   dir="$(mktemp -d)"
   out="${dir}/out.txt"
   setup_fixture "$dir"
+  dispatch_home="$(<"${dir}/dispatch-home.txt")"
+  project="$(slug_from_dir "$dir" loopcrash)"
 
-  mapfile -d '' -t args < <(base_args "$dir" crashrecoverproj)
+  mapfile -d '' -t args < <(base_args "$dir" "$project")
+  mapfile -d '' -t env_args < <(base_env "$dir")
   run_capture "$out" env \
-    DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE="${dir}/claude-credentials.json" \
-    DISPATCH_LOOP_LOOP_ROOT="${dir}/loop-root" \
+    "${env_args[@]}" \
     MOCK_F1_MODE=success \
     MOCK_F2_MODE=worker_crash \
     bash "$SCRIPT" "${args[@]}"
@@ -281,10 +330,13 @@ run_case_worker_crash() {
   assert_status "$RUN_STATUS" 7 "worker-crash"
   assert_contains "$out" "WORKER_CRASH_DETECTED" "worker-crash"
   assert_contains "$out" "crash_file=" "worker-crash"
+  assert_contains "$out" "recovery_hint=cd ${dispatch_home}/repos/${project}" "worker-crash"
+  assert_contains "$out" "${dispatch_home}/.codex-headless/${project}/w1" "worker-crash"
   assert_contains "$out" '"status":"crash"' "worker-crash"
 }
 
 main() {
+  run_case_missing_dispatch_home
   run_case_dry_run
   run_case_missing_project
   run_case_missing_manifest

@@ -171,7 +171,7 @@ print_final() {
   printf 'Home: %s\n' "$DISPATCH_HOME"
   printf 'Repo: %s\n' "$REPO_DIR"
   printf 'Run dispatch via: sudo -u %s bash %s/scripts/dispatch-loop-hardened.sh ...\n' "$USER_NAME" "$REPO_DIR"
-  printf 'Phase 1 note: some legacy /root path defaults remain until Phase 2.\n'
+  printf 'Set DISPATCH_HOME=%s before invoking dispatch-* scripts (or source the env file).\n' "$DISPATCH_HOME"
 }
 
 while [ "$#" -gt 0 ]; do

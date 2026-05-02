@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${DISPATCH_HOME:?DISPATCH_HOME must be set}"
+
 SCRIPT_NAME="dispatch-loop-hardened"
 PROJECT=""; MANIFEST_FILE=""; TARGET_REPO=""; REVIEW_PROMPT_FILE=""
 WORKER_NAME="w1"; MODE="gate"; CREATE_REPO=0; TEARDOWN=0; MAX_WAIT_SEC=1800
-SCRIPTS_DIR="${DISPATCH_LOOP_SCRIPTS_DIR:-/root/2026-ccc-dispatcher/scripts}"; DRY_RUN=0
+SCRIPTS_DIR="${DISPATCH_LOOP_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"; DRY_RUN=0
 CLAUDE_CREDENTIALS_FILE="${DISPATCH_LOOP_CLAUDE_CREDENTIALS_FILE:-/home/claudeuser/.claude/.credentials.json}"
-LOOP_ROOT="${DISPATCH_LOOP_LOOP_ROOT:-/root/2026-loop}"
-TEARDOWN_SCRIPT="${DISPATCH_LOOP_TEARDOWN_SCRIPT:-/root/2026-loop/repo-comp-loop-env/scripts/teardown.sh}"
+LOOP_ROOT="${DISPATCH_LOOP_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
+TEARDOWN_SCRIPT="${DISPATCH_LOOP_TEARDOWN_SCRIPT:-${DISPATCH_HOME}/dispatch/scripts/teardown.sh}"
 REVIEW_MERGE_SCRIPT="${DISPATCH_LOOP_REVIEW_MERGE_SCRIPT:-}"
 F1_LOG=""; F2_LOG=""; THREAD_ID=""; PR_URL=""
 REVIEW_VERDICT=""; REVIEW_SESSION_ID=""; REVIEW_COST_USD=""
@@ -98,14 +100,14 @@ on_exit() {
 trap 'on_exit $?' EXIT
 
 repo_origin_main_sha() {
-  local repo="${LOOP_ROOT}/repo-${PROJECT}"
+  local repo="${LOOP_ROOT}/${PROJECT}"
 
   git -C "$repo" fetch origin main >/dev/null 2>&1 || return 1
   git -C "$repo" rev-parse origin/main 2>/dev/null
 }
 
 worker_still_running() {
-  pgrep -f -- "codex exec.*-C ${LOOP_ROOT}/repo-${PROJECT}/" >/dev/null 2>&1
+  pgrep -f -- "codex exec.*-C ${LOOP_ROOT}/${PROJECT}/" >/dev/null 2>&1
 }
 
 validate_args() {
@@ -210,7 +212,7 @@ recover_b30() {
 
 phase_d() {
   local manifest_tmp="/tmp/${PROJECT}-${WORKER_NAME}-manifest.md"
-  local worktree="${LOOP_ROOT}/repo-${PROJECT}/.letta/worktrees/worker-${PROJECT}-${WORKER_NAME}"
+  local worktree="${LOOP_ROOT}/${PROJECT}/.letta/worktrees/worker-${PROJECT}-${WORKER_NAME}"
   local -a find_cmd=(find "$worktree" -path "$worktree/.git" -prune -o -type f)
   local -a crash_files=()
   PHASES_RUN+=("D")
@@ -225,7 +227,7 @@ phase_d() {
     SUMMARY_STATUS="crash"
     ERRORS+=("WORKER_CRASH_DETECTED: files preserved in worktree, manual review needed.")
     log "Phase D (recovery): WORKER_CRASH_DETECTED: files preserved in worktree, manual review needed"
-    printf 'recovery_hint=cd %s && git status && git add -A && git commit\n' "${LOOP_ROOT}/repo-${PROJECT}"
+    printf 'recovery_hint=cd %s && git status && git add -A && git commit\n' "${LOOP_ROOT}/${PROJECT}"
     printf '%s\n' "${crash_files[@]}" | sed 's/^/crash_file=/'
     exit 7
   fi

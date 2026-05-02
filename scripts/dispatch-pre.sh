@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${DISPATCH_HOME:?DISPATCH_HOME must be set (source bootstrap output or export manually)}"
+
 SCRIPT_NAME="dispatch-pre"
 PROJECT=""; MANIFEST_FILE=""; TARGET_REPO=""; WORKER_NAME="w1"
-CREATE_REPO=0; CODEX_API_KEY_FILE="/root/.openai-api-key"
-SCRIPTS_DIR="/root/2026-codex-app-dispatcher/COMP-LOOP-ENV/scripts"
-OVERLAY="/root/2026-opus-dispatcher-ma/scripts/pre-dispatch-overlay-v2.sh"
+CREATE_REPO=0
+SCRIPTS_DIR="${DISPATCH_PRE_SCRIPTS_DIR:-${DISPATCH_HOME}/dispatch/scripts}"
+LOOP_ROOT="${DISPATCH_PRE_LOOP_ROOT:-${DISPATCH_HOME}/repos}"
+CODEX_HEADLESS_ROOT="${DISPATCH_PRE_CODEX_HEADLESS_ROOT:-${DISPATCH_HOME}/.codex-headless}"
+CODEX_API_KEY_FILE="${DISPATCH_PRE_CODEX_API_KEY_FILE:-${DISPATCH_HOME}/.config/codex-api-key}"
+OVERLAY="${DISPATCH_PRE_OVERLAY:-${SCRIPTS_DIR}/pre-dispatch-overlay-v2.sh}"
 DRY_RUN=0; REPO_URL=""; SETUP_LOG=""; MANIFEST_TMP=""; STAGING_DIR=""; DISPATCH_LOG=""; DISPATCH_PID=""
 
 usage() {
@@ -55,7 +60,7 @@ claude_hours() {
 }
 
 latest_headless_log() {
-  local dir="/root/codex-headless/${PROJECT}/${WORKER_NAME}"
+  local dir="${CODEX_HEADLESS_ROOT}/${PROJECT}/${WORKER_NAME}"
   [ -d "$dir" ] || return 1
   find "$dir" -maxdepth 1 -type f -name 'run-*.log' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-
 }
@@ -160,7 +165,7 @@ phase5() {
 }
 
 phase6() {
-  local branch="worker/${PROJECT}-${WORKER_NAME}" repo_path="/root/2026-loop/repo-${PROJECT}" pr_url="" push_output="" push_status=0 dispatch_cmd=""
+  local branch="worker/${PROJECT}-${WORKER_NAME}" repo_path="${LOOP_ROOT}/${PROJECT}" pr_url="" push_output="" push_status=0 dispatch_cmd=""
   STAGING_DIR="/tmp/${PROJECT}-staging"; DISPATCH_LOG="/tmp/${PROJECT}-dispatch.log"
   if [ "$DRY_RUN" -eq 1 ]; then
     log "Phase 6 (commit + dispatch): DRY-RUN, branch ${branch}, log=${DISPATCH_LOG}"
@@ -205,12 +210,12 @@ phase6() {
 phase7() {
   local headless_log="" thread_id=""
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "Phase 7 (verify): DRY-RUN, would inspect /root/codex-headless/${PROJECT}/${WORKER_NAME}/run-*.log"
+    log "Phase 7 (verify): DRY-RUN, would inspect ${CODEX_HEADLESS_ROOT}/${PROJECT}/${WORKER_NAME}/run-*.log"
     return 0
   fi
   sleep 5
   headless_log="$(latest_headless_log || true)"
-  [ -n "$headless_log" ] || die 4 "Dispatch log exists but no headless run log was created under /root/codex-headless/${PROJECT}/${WORKER_NAME}."
+  [ -n "$headless_log" ] || die 4 "Dispatch log exists but no headless run log was created under ${CODEX_HEADLESS_ROOT}/${PROJECT}/${WORKER_NAME}."
   grep -Fq 'thread started:' "$headless_log" || die 4 "Dispatch started but no 'thread started' marker was found in ${headless_log}."
   thread_id="$(sed -n 's/^thread started: //p' "$headless_log" | tail -n 1)"
   [ -n "$thread_id" ] || die 4 "Found 'thread started' but could not parse thread_id from ${headless_log}."
