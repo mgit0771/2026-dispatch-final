@@ -4,6 +4,28 @@ description: Self-bootstrapping prompt for fresh agent inheriting ownership of d
 
 # Agent prompt — paste this to fresh agent
 
+## TL;DR (post-Phase 4a)
+
+The canonical SSOT for the active dispatch chain is **this repo** —
+`mgit0771/2026-dispatch-final`. After clone + `bootstrap.sh`, every
+artifact a new agent or operator needs to drive a live dispatch lives
+here:
+
+- `README.md` — quickstart, layout, workflow, cost snapshot
+- `bootstrap.sh` — one-command per-dispatcher setup
+- `scripts/` — 12 production shell scripts (F1-F4 originals + 3 hardened
+  + ccc-headless-task.sh + 4 helper chain)
+- `tests/` — shell tests for the active chain
+- `playbook/` — quick-start, blockers, cost-model, decision-framework
+- `templates/` — manifest + CCC review/merge prompt templates
+- `docs/architecture.md` — actors / flow / isolation
+- `handoff/` — ownership doc + ARCHITECTURE-V3 + R1-R8 + Phase 1-4 summary
+
+A fresh agent should read this repo first; the long-form historical
+handoff package below is reference-only (R1-R8 archives, design context).
+
+## Long-form handoff (historical reference)
+
 ## Minimal version (pointers only, no opinions)
 
 ```

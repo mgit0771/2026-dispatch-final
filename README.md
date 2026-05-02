@@ -61,9 +61,17 @@ Requirements:
 After bootstrap:
 
 ```bash
-export DISPATCH_HOME=/home/dispatcher-alpha
-sudo -u dispatcher-alpha bash /home/dispatcher-alpha/dispatch/scripts/dispatch-loop-hardened.sh --help
+# F1 (dispatch-pre.sh) requires root for useradd/setup. Invoke as root
+# with DISPATCH_HOME pointed at the dispatcher home and GITHUB_TOKEN
+# loaded from the per-dispatcher PAT file:
+sudo env DISPATCH_HOME=/home/dispatcher-alpha \
+     GITHUB_TOKEN="$(cat /home/dispatcher-alpha/.config/github-pat)" \
+     bash /home/dispatcher-alpha/dispatch/scripts/dispatch-loop-hardened.sh --help
 ```
+
+Note: a future phase may add a NOPASSWD sudo profile so that
+`dispatcher-alpha` can drive the chain without root, but the active
+`dispatch-pre.sh` Phase 0 still has `is_root` gate as of Phase 4a.
 
 ## Repo Layout
 

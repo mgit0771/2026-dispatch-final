@@ -140,3 +140,41 @@ Evidence:
 - R8 zahartował F2/F3/F4 po audycie
 
 To repo Phase 1 zbiera wynik tych ośmiu runów w jednym miejscu.
+
+---
+
+## SSOT consolidation cycle — 2026-05-02
+
+Po R8 owner przeprowadził 4-fazowy plan konsolidacji wszystkich rozproszonych
+artefaktów w jedno repo `mgit0771/2026-dispatch-final`. Każda faza dispatch'owana
+przez F3-h (single-command) z VPS, każda zmergowana po PASS verdict CCC review.
+
+| Phase | Scope | Main HEAD | Cost CCC |
+|---|---|---|---|
+| 1 | repo structure + bootstrap.sh + copy 7 scripts + docs | `bf65c21a` | $0.42 |
+| 2 | parametric `${DISPATCH_HOME}` paths in 4 active scripts | `b11eb25` | $0.79 |
+| 3 | Anthropic API migration (drop OAuth) + ccc-headless-task in-repo | `490e1979` | $1.32 |
+| 4a | gap fix — copy 4 helpers (overlay/setup-repo/user/dispatch-worker) | `bfa39c9` | $0.49 |
+
+Phase 4 LIVE parallel test:
+
+- bootstrap dwóch isolated dispatchers `test1` + `test2`
+- każdy dispatch'ował tiny `hello.txt` worker do disposable repo
+  (`CCC-PH4LT-T1-501`, `CCC-PH4LT-T2-501`)
+- pierwsza CCC review FAIL'd (mój prompt za ostry — zignorował `manifests/worker-w1.md`
+  artifact F1); relaunch z poprawionym prompt → oba PASS+merged
+- isolation perfect: zero cross-contamination między `/home/dispatcher-test1`
+  i `/home/dispatcher-test2`, oddzielne ccuser-* (uid 1018/1019), oddzielne
+  `.codex-headless` / `.ccc-headless` / `repos`
+
+Total SSOT cycle cost: ~$3.93 in CCC.
+
+Demonstrated property: dowolny agent / operator może `git clone` + `bootstrap.sh`
++ run dispatch — wszystko self-contained, brak zewnętrznych zależności poza
+sekretami (PAT/Anthropic/Codex keys).
+
+Pending follow-ups (out of SSOT cycle scope):
+
+- non-root dispatch invocation (`dispatch-pre.sh` Phase 0 nadal wymaga root)
+- F2-h Phase 9 `MERGED_SHA` parser fragility w v2 relaunch case (cosmetic — merge succeeds)
+- cleanup test resources gdy nie potrzebne
